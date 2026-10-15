@@ -1,7 +1,7 @@
 "use client";
 
 import { useAutoAnimate } from "@formkit/auto-animate/react";
-import { ChevronDownIcon, LayoutTemplateIcon, PlusCircleIcon } from "lucide-react";
+import { ChevronDownIcon, LayoutTemplateIcon, PlusCircleIcon, UploadIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { type ComponentProps, useEffect, useMemo, useState } from "react";
 import toast from "react-hot-toast";
@@ -13,6 +13,7 @@ import { CUSTOM_SURVEY_TEMPLATE_ID } from "@/app/lib/templates";
 import type { TAIUnavailableReason } from "@/lib/ai/service";
 import { FORMBRICKS_SURVEYS_FILTERS_KEY_LS } from "@/lib/localStorage";
 import { getV3ApiErrorMessage } from "@/modules/api/lib/v3-client";
+import { ImportSurveyModal } from "@/modules/survey/components/import-survey-modal";
 import { CreateWithAIDialog } from "@/modules/survey/components/template-list/components/create-with-ai-dialog";
 import { useCreateSurveyFromTemplate } from "@/modules/survey/components/template-list/hooks/use-create-survey-from-template";
 import { useArchiveSurvey } from "@/modules/survey/list/hooks/use-archive-survey";
@@ -73,6 +74,7 @@ const NewSurveyMenu = ({
   const { t } = useTranslation();
   const router = useRouter();
   const [isAIDialogOpen, setIsAIDialogOpen] = useState(false);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const createSurveyMutation = useCreateSurveyFromTemplate();
   const workspaceBasePath = `/workspaces/${workspace.id}`;
 
@@ -131,6 +133,11 @@ const NewSurveyMenu = ({
             }}>
             {t("workspace.surveys.ai_create.start_from_scratch")}
           </DropdownMenuItem>
+          <DropdownMenuItem
+            icon={<UploadIcon className="size-4" />}
+            onSelect={() => setIsImportModalOpen(true)}>
+            {t("workspace.surveys.import_survey")}
+          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
       <CreateWithAIDialog
@@ -141,6 +148,7 @@ const NewSurveyMenu = ({
         open={isAIDialogOpen}
         onOpenChange={setIsAIDialogOpen}
       />
+      <ImportSurveyModal open={isImportModalOpen} setOpen={setIsImportModalOpen} workspaceId={workspace.id} />
     </>
   );
 };

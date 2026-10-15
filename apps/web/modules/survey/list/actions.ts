@@ -1,7 +1,7 @@
 "use server";
 
 import { z } from "zod";
-import { OperationNotAllowedError } from "@formbricks/types/errors";
+import { OperationNotAllowedError, ResourceNotFoundError } from "@formbricks/types/errors";
 import { assertCan } from "@/lib/authorization";
 import { authenticatedActionClient } from "@/lib/utils/action-client";
 import { getOrganizationIdFromWorkspaceId, getWorkspaceIdFromSurveyId } from "@/lib/utils/helper";
@@ -12,7 +12,9 @@ import {
 import { applyRateLimit } from "@/modules/core/rate-limit/helpers";
 import { rateLimitConfigs } from "@/modules/core/rate-limit/rate-limit-configs";
 import { withAuditLogging } from "@/modules/ee/audit-logs/lib/handler";
-import { copySurveyToOtherWorkspace } from "@/modules/survey/list/lib/survey";
+import { sanitizeSurveyForExport } from "@/modules/survey/lib/export-survey";
+import { getSurvey } from "@/modules/survey/lib/survey";
+import { copySurveyToOtherWorkspace, importSurvey } from "@/modules/survey/list/lib/survey";
 
 const ZCopySurveyToOtherWorkspaceAction = z.object({
   surveyId: z.cuid2(),
@@ -87,3 +89,50 @@ export const generateSingleUseIdsAction = authenticatedActionClient
       parsedInput.isEncrypted
     );
   });
+
+const ZGetSurveyForExportAction = z.object({
+  surveyId: z.cuid2(),
+});
+
+export const getSurveyForExportAction = authenticatedActionClient
+  .inputSchema(ZGetSurveyForExportAction)
+  .action(async ({ ctx, parsedInput }) => {
+    const workspaceId = await getWorkspaceIdFromSurveyId(parsedInput.surveyId);
+
+    await assertCan({ type: "user", id: ctx.user.id }, "workspace.read", {
+      type: "workspace",
+      id: workspaceId,
+    });
+
+    const survey = await getSurvey(parsedInput.surveyId);
+    if (!survey) {
+      throw new ResourceNotFoundError("Survey", parsedInput.surveyId);
+    }
+
+    return sanitizeSurveyForExport(survey);
+  });
+
+const ZImportSurveyAction = z.object({
+  workspaceId: z.cuid2(),
+  survey: z.record(z.string(), z.unknown()),
+});
+
+export const importSurveyAction = authenticatedActionClient.inputSchema(ZImportSurveyAction).action(
+  withAuditLogging("created", "survey", async ({ ctx, parsedInput }) => {
+    await assertCan({ type: "user", id: ctx.user.id }, "workspace.write", {
+      type: "workspace",
+      id: parsedInput.workspaceId,
+    });
+
+    await applyRateLimit(rateLimitConfigs.actions.stateMutation, parsedInput.workspaceId);
+
+    const organizationId = await getOrganizationIdFromWorkspaceId(parsedInput.workspaceId);
+    ctx.auditLoggingCtx.organizationId = organizationId;
+
+    const result = await importSurvey(parsedInput.workspaceId, parsedInput.survey, ctx.user.id);
+    ctx.auditLoggingCtx.surveyId = result.id;
+    ctx.auditLoggingCtx.newObject = result;
+
+    return result;
+  })
+);

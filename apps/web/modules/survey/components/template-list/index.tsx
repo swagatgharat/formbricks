@@ -13,7 +13,9 @@ import { CUSTOM_SURVEY_TEMPLATE_ID, templates } from "@/app/lib/templates";
 import type { TAIUnavailableReason } from "@/lib/ai/service";
 import { IS_DEVELOPMENT_BUILD } from "@/lib/env-client";
 import { getV3ApiErrorMessage } from "@/modules/api/lib/v3-client";
+import { ImportSurveyModal } from "@/modules/survey/components/import-survey-modal";
 import { CreateWithAITemplate } from "./components/create-with-ai-template";
+import { ImportSurveyTemplate } from "./components/import-survey-template";
 import { StartFromScratchTemplate } from "./components/start-from-scratch-template";
 import { Template } from "./components/template";
 import { TemplateFilters } from "./components/template-filters";
@@ -53,6 +55,7 @@ export const TemplateList = ({
   const router = useRouter();
   const [activeTemplate, setActiveTemplate] = useState<TTemplate | null>(null);
   const [selectedFilter, setSelectedFilter] = useState<TTemplateFilter[]>([null, null, null]);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const createSurveyMutation = useCreateSurveyFromTemplate();
   const surveyType: TSurveyType = useMemo(() => {
     if (workspace.config.channel) {
@@ -132,6 +135,7 @@ export const TemplateList = ({
           loading={createSurveyMutation.isPending}
           noPreview={noPreview}
         />
+        <ImportSurveyTemplate onImportClick={() => setIsImportModalOpen(true)} />
         {showAICreateCard && (
           <CreateWithAITemplate
             workspaceId={workspaceId}
@@ -159,6 +163,7 @@ export const TemplateList = ({
           }
         )}
       </div>
+      <ImportSurveyModal open={isImportModalOpen} setOpen={setIsImportModalOpen} workspaceId={workspaceId} />
     </main>
   );
 };

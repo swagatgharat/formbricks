@@ -7,6 +7,7 @@ import {
   ArchiveRestoreIcon,
   ArrowRightLeftIcon,
   CopyIcon,
+  DownloadIcon,
   EyeIcon,
   LinkIcon,
   MoreVertical,
@@ -26,7 +27,8 @@ import { cn } from "@/lib/cn";
 import { getFormattedErrorMessage } from "@/lib/utils/helper";
 import { getV3ApiErrorMessage } from "@/modules/api/lib/v3-client";
 import { EditPublicSurveyAlertDialog } from "@/modules/survey/components/edit-public-survey-alert-dialog";
-import { copySurveyToOtherWorkspaceAction } from "@/modules/survey/list/actions";
+import { exportSurveyAsJson } from "@/modules/survey/lib/export-survey";
+import { copySurveyToOtherWorkspaceAction, getSurveyForExportAction } from "@/modules/survey/list/actions";
 import { CopySurveyModal } from "@/modules/survey/list/components/copy-survey-modal";
 import { RenameSurveyModal } from "@/modules/survey/list/components/rename-survey-modal";
 import { surveyKeys } from "@/modules/survey/list/lib/query";
@@ -215,6 +217,23 @@ export const SurveyDropDownMenu = ({
     }
   };
 
+  const handleExportSurvey = async () => {
+    setIsDropDownOpen(false);
+    const toastId = toast.loading(t("workspace.surveys.exporting_survey"));
+    try {
+      const response = await getSurveyForExportAction({ surveyId: survey.id });
+      if (response?.data) {
+        exportSurveyAsJson(response.data);
+        toast.success(t("workspace.surveys.survey_exported_successfully"), { id: toastId });
+        return;
+      }
+      toast.error(getFormattedErrorMessage(response), { id: toastId });
+    } catch (error) {
+      logger.error(error);
+      toast.error(t("workspace.surveys.error_exporting_survey"), { id: toastId });
+    }
+  };
+
   if (!hasVisibleActions) {
     return null;
   }
@@ -343,6 +362,17 @@ export const SurveyDropDownMenu = ({
                 }}>
                 <ArrowRightLeftIcon className="size-4" />
                 {t("workspace.surveys.copy_to")}
+              </DropdownMenuItem>
+            )}
+            {!isArchived && canManageSurvey && (
+              <DropdownMenuItem
+                data-testid="export-survey"
+                icon={<DownloadIcon className="size-4" />}
+                onSelect={(e) => {
+                  e.preventDefault();
+                  void handleExportSurvey();
+                }}>
+                {t("workspace.surveys.export_as_json")}
               </DropdownMenuItem>
             )}
             {canPreviewOrCopyLink && (

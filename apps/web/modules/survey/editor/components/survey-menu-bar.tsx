@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeftIcon, SettingsIcon } from "lucide-react";
+import { ArrowLeftIcon, DownloadIcon, SettingsIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import toast from "react-hot-toast";
@@ -26,6 +26,7 @@ import { createSegmentAction } from "@/modules/ee/contacts/segments/actions";
 import { hasUnsavedSurveyChanges, isJustSavedBypassValid } from "@/modules/survey/editor/lib/unsaved-changes";
 import { scrollElementCardIntoView } from "@/modules/survey/editor/lib/utils";
 import { TSurveyDraft } from "@/modules/survey/editor/types/survey";
+import { exportSurveyAsJson } from "@/modules/survey/lib/export-survey";
 import { Alert, AlertButton, AlertTitle } from "@/modules/ui/components/alert";
 import { AlertDialog } from "@/modules/ui/components/alert-dialog";
 import { Button } from "@/modules/ui/components/button";
@@ -740,6 +741,20 @@ export const SurveyMenuBar = ({
               <AlertButton onClick={() => setIsCautionDialogOpen(true)}>{t("common.learn_more")}</AlertButton>
             </Alert>
           </div>
+        )}
+        {!isCxMode && (
+          <Button
+            data-testid="export-survey-button"
+            variant="secondary"
+            size="sm"
+            onClick={() => {
+              exportSurveyAsJson(localSurvey);
+              toast.success(t("workspace.surveys.survey_exported_successfully"));
+            }}
+            type="button">
+            <DownloadIcon />
+            {t("workspace.surveys.export_as_json")}
+          </Button>
         )}
         {!isCxMode && (
           <Button

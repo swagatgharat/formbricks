@@ -499,3 +499,224 @@ export const getWorkspaceSurveyCount = reactCache(async (workspaceId: string): P
     throw error;
   }
 });
+
+/**
+ * Imports a survey from a sanitized JSON payload into the target workspace.
+ */
+export const importSurvey = async (
+  targetWorkspaceId: string,
+  surveyInput: Record<string, unknown>,
+  userId: string
+): Promise<{ id: string }> => {
+  validateInputs([targetWorkspaceId, z.cuid2()]);
+
+  try {
+    const targetWorkspace = await getWorkspaceWithLanguages(targetWorkspaceId);
+    if (!targetWorkspace) throw new ResourceNotFoundError("Workspace", targetWorkspaceId);
+
+    const name =
+      typeof surveyInput.name === "string" && surveyInput.name.trim()
+        ? surveyInput.name.trim()
+        : "Imported Survey";
+
+    const type =
+      typeof surveyInput.type === "string"
+        ? (surveyInput.type as unknown as Prisma.SurveyCreateInput["type"])
+        : "link";
+
+    const hasBlocks = Array.isArray(surveyInput.blocks) && surveyInput.blocks.length > 0;
+    const hasQuestions = Array.isArray(surveyInput.questions) && surveyInput.questions.length > 0;
+
+    if (!hasBlocks && !hasQuestions) {
+      throw new InvalidInputError("Survey must contain at least one question or block.");
+    }
+
+    const blocks = hasBlocks ? structuredClone(surveyInput.blocks) : [];
+    const questions = !hasBlocks && hasQuestions ? structuredClone(surveyInput.questions) : [];
+
+    const existingActionClasses = await prisma.actionClass.findMany({
+      where: { workspaceId: targetWorkspace.id },
+      select: { name: true, type: true, key: true, noCodeConfig: true, id: true },
+    });
+
+    const surveyData: Prisma.SurveyCreateInput = {
+      id: createId(),
+      name,
+      type,
+      status: "draft",
+      welcomeCard: surveyInput.welcomeCard
+        ? (structuredClone(surveyInput.welcomeCard) as unknown as Prisma.InputJsonValue)
+        : { enabled: false },
+      blocks: blocks as unknown as Prisma.InputJsonValue,
+      questions: questions as unknown as Prisma.InputJsonValue,
+      endings: surveyInput.endings
+        ? (structuredClone(surveyInput.endings) as unknown as Prisma.InputJsonValue)
+        : [],
+      variables: surveyInput.variables
+        ? (structuredClone(surveyInput.variables) as unknown as Prisma.InputJsonValue)
+        : [],
+      hiddenFields: surveyInput.hiddenFields
+        ? (structuredClone(surveyInput.hiddenFields) as unknown as Prisma.InputJsonValue)
+        : { fieldIds: [] },
+      displayOption:
+        (surveyInput.displayOption as unknown as Prisma.SurveyCreateInput["displayOption"]) ?? "displayOnce",
+      recontactDays: typeof surveyInput.recontactDays === "number" ? surveyInput.recontactDays : null,
+      displayLimit: typeof surveyInput.displayLimit === "number" ? surveyInput.displayLimit : null,
+      delay: typeof surveyInput.delay === "number" ? surveyInput.delay : 0,
+      autoClose: typeof surveyInput.autoClose === "number" ? surveyInput.autoClose : null,
+      autoComplete: typeof surveyInput.autoComplete === "number" ? surveyInput.autoComplete : null,
+      styling: surveyInput.styling
+        ? (structuredClone(surveyInput.styling) as unknown as Prisma.InputJsonValue)
+        : Prisma.JsonNull,
+      surveyClosedMessage: surveyInput.surveyClosedMessage
+        ? (structuredClone(surveyInput.surveyClosedMessage) as unknown as Prisma.InputJsonValue)
+        : Prisma.JsonNull,
+      singleUse: surveyInput.singleUse
+        ? (structuredClone(surveyInput.singleUse) as unknown as Prisma.InputJsonValue)
+        : Prisma.JsonNull,
+      pin: typeof surveyInput.pin === "string" ? surveyInput.pin : null,
+      redirectUrl: typeof surveyInput.redirectUrl === "string" ? surveyInput.redirectUrl : null,
+      workspace: {
+        connect: {
+          id: targetWorkspace.id,
+        },
+      },
+      creator: {
+        connect: {
+          id: userId,
+        },
+      },
+    };
+
+    // Handle languages if present
+    if (Array.isArray(surveyInput.languages) && surveyInput.languages.length > 0) {
+      type TLanguageInput = {
+        default?: boolean;
+        enabled?: boolean;
+        language?: { code?: string; alias?: string | null };
+      };
+      const rawLanguages = surveyInput.languages as TLanguageInput[];
+      surveyData.languages = {
+        create: rawLanguages
+          .filter((sl): sl is TLanguageInput & { language: { code: string } } => Boolean(sl?.language?.code))
+          .map((sl) => ({
+            language: {
+              connectOrCreate: {
+                where: {
+                  workspaceId_code: { code: sl.language.code, workspaceId: targetWorkspace.id },
+                },
+                create: {
+                  code: sl.language.code,
+                  alias: sl.language.alias ?? null,
+                  workspaceId: targetWorkspace.id,
+                },
+              },
+            },
+            default: Boolean(sl.default),
+            enabled: sl.enabled !== false,
+          })),
+      };
+    }
+
+    // Handle triggers if present
+    if (Array.isArray(surveyInput.triggers) && surveyInput.triggers.length > 0) {
+      type TTriggerInput = {
+        actionClass?: {
+          name?: string;
+          type?: "code" | "noCode";
+          key?: string | null;
+          description?: string | null;
+          noCodeConfig?: Prisma.InputJsonValue;
+        };
+      };
+      const rawTriggers = surveyInput.triggers as TTriggerInput[];
+      surveyData.triggers = {
+        create: rawTriggers
+          .filter((t): t is TTriggerInput & { actionClass: { name: string } } =>
+            Boolean(t?.actionClass?.name)
+          )
+          .map((trigger): Prisma.SurveyTriggerCreateWithoutSurveyInput => {
+            const ac = trigger.actionClass;
+            if (ac.type === "code" && ac.key) {
+              const existing = existingActionClasses.find((item) => item.key === ac.key);
+              if (existing) {
+                return { actionClass: { connect: { id: existing.id } } };
+              }
+              return {
+                actionClass: {
+                  connectOrCreate: {
+                    where: { key_workspaceId: { key: ac.key, workspaceId: targetWorkspace.id } },
+                    create: {
+                      name: ac.name,
+                      description: ac.description ?? null,
+                      type: "code",
+                      key: ac.key,
+                      workspaceId: targetWorkspace.id,
+                    },
+                  },
+                },
+              };
+            }
+
+            const existing = existingActionClasses.find((item) => item.name === ac.name);
+            if (existing) {
+              return { actionClass: { connect: { id: existing.id } } };
+            }
+
+            return {
+              actionClass: {
+                connectOrCreate: {
+                  where: { name_workspaceId: { name: ac.name, workspaceId: targetWorkspace.id } },
+                  create: {
+                    name: ac.name,
+                    description: ac.description ?? null,
+                    type: ac.type ?? "noCode",
+                    noCodeConfig: ac.noCodeConfig ? structuredClone(ac.noCodeConfig) : undefined,
+                    workspaceId: targetWorkspace.id,
+                  },
+                },
+              },
+            };
+          }),
+      };
+    }
+
+    if (surveyData.blocks) {
+      const result = checkForInvalidMediaInBlocks(surveyData.blocks as unknown as TSurveyBlock[]);
+      if (!result.ok) {
+        throw new InvalidInputError(result.error.message);
+      }
+    }
+
+    const newSurvey = await prisma.$transaction(
+      async (tx) => {
+        const createdSurvey = await tx.survey.create({
+          data: surveyData,
+          select: {
+            id: true,
+            workspaceId: true,
+            variables: true,
+            hiddenFields: true,
+          },
+        });
+
+        await reconcileEmbeddedData(tx, {
+          surveyId: createdSurvey.id,
+          workspaceId: createdSurvey.workspaceId,
+          patch: { variables: createdSurvey.variables, hiddenFields: createdSurvey.hiddenFields },
+        });
+
+        return createdSurvey;
+      },
+      { timeout: 30000 }
+    );
+
+    return newSurvey;
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError) {
+      logger.error(error, "Error importing survey");
+      throw new DatabaseError(error.message);
+    }
+    throw error;
+  }
+};
